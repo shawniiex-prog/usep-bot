@@ -1,48 +1,28 @@
 import requests
-import csv
-from io import StringIO
-from telegram import Bot
 import os
-from datetime import datetime
+from telegram import Bot
 
-# Telegram bot info
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# NEMS CSV URL for USEP data
-CSV_URL = "https://www.nems.emcsg.com/nems-prices?download=csv"
+API_URL = "https://www.nems.emcsg.com/api/DataSync/Get?value=10&fromDate=&toDate="
 
 def fetch_latest_usep():
     try:
-        response = requests.get(CSV_URL, timeout=30)
+        response = requests.get(API_URL, timeout=30)
         response.raise_for_status()
+        data = response.json()
 
-        # Read CSV content
-        csv_file = StringIO(response.text)
-        reader = csv.DictReader(csv_file)
+        # Navigate through the structure
+        usep = data["data"]["data"][0]["current"][0]["value"]
+        time_label = data["data"]["data"][0]["currentdate"]
+        last_update = data["data"]["data"][0]["lastupdate"]
 
-        # Collect all USEP entries with their timestamp
-        usep_entries = []
-        for row in reader:
-            if "Uniform Singapore Energy Price" in row and "Trading Interval" in row:
-                ts_str = row["Trading Interval"]  # e.g., 2025-10-15 12:30
-                try:
-                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M")
-                    value = row["Uniform Singapore Energy Price"]
-                    usep_entries.append((ts, value))
-                except Exception:
-                    continue
-
-        if not usep_entries:
-            return None
-
-        # Sort by timestamp and get the latest
-        latest_ts, latest_usep = sorted(usep_entries, key=lambda x: x[0])[-1]
-        return latest_usep, latest_ts
+        return usep, time_label, last_update
 
     except Exception as e:
         print("Error fetching USEP:", e)
-        return None, None
+        return None, None, None
 
 def send_telegram_message(message):
     try:
@@ -52,10 +32,16 @@ def send_telegram_message(message):
         print("Error sending Telegram message:", e)
 
 if __name__ == "__main__":
-    usep, ts = fetch_latest_usep()
+    usep, time_label, last_update = fetch_latest_usep()
     if usep:
-        message = f"Latest USEP ({ts}): {usep} $/MWh"
+        message = (
+            f"⚡ USEP Update ⚡\n\n"
+            f"Current Price: {usep} $/MWh\n"
+            f"Interval: {time_label}\n"
+            f"Last Updated: {last_update}"
+        )
     else:
-        message = "Could not retrieve USEP value."
+        message = "❌ Could not retrieve the USEP value from the API."
+
     print(message)
     send_telegram_message(message)
